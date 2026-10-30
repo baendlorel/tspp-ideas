@@ -1,0 +1,37 @@
+{
+  "compilerOptions": {
+    // 文件布局
+    "rootDir": "./src",
+    "outDir": "./dist",
+
+    // 环境与模块
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "es2023",
+    "lib": ["es2023", "dom", "dom.iterable"],
+    "types": [],
+
+    // 类型检查严格度
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+
+    // 模块互操作与转译安全
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "noUncheckedSideEffectImports": true,
+
+    // 输出
+    "sourceMap": true,
+    "declaration": true,
+    "declarationMap": true,
+
+    // 性能与兼容
+    "skipLibCheck": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
