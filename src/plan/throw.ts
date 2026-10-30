@@ -2,7 +2,7 @@
  * 给类增加async constructor的提案
  * 案例代码在example.ts中
  *
- * 以下是降级编译方案
+ * 以下是降级编译方案，名为Throw法。
  * 1. 将async constructor的入参、函数体提取出来，放到一个新函数async function constructA中.
  *    如果有super的调用，那么就将父类生成的constructParent函数放到对应位置并且.call(this,...args)
  * 2. 原来的构造函数去掉constructor的async标记，函数体改为3个步骤

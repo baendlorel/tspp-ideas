@@ -2,7 +2,7 @@
  * 给类增加async constructor的提案
  * 案例代码在example.ts中
  *
- * 以下是降级编译方案
+ * 以下是降级编译方案，名为SubInit法
  * 1. 创建两个symbol，一个用于标记异步构造函数，一个用于调用验证
  * 2. 将constructor内部的逻辑移动到这个[hiddenSym]方法中
  *    这样一来其实构造函数是空的
