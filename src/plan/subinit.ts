@@ -16,9 +16,9 @@
 const hiddenSym = Symbol();
 const callSym = Symbol();
 
-async function createInstance(cls: any, args: any) {
-  const inst = new cls(args);
-  await inst[hiddenSym](callSym, args);
+async function createInstance(cls: any, ...args: any[]) {
+  const inst = new cls(...args);
+  await inst[hiddenSym](callSym, ...args);
   return inst;
 }
 
@@ -28,6 +28,7 @@ class A {
 
   // 这里会被Reflect.ownKeys遍历出来，但没关系，可以接受
   async [hiddenSym](key: symbol, args: any) {
+    if (key !== callSym) throw new Error('Invalid call to hiddenSym');
     this.#data = await fetch('/test', args)
       .then((res) => res.json())
       .catch(() => null);
@@ -45,6 +46,7 @@ class ASub extends A {
   }
 
   override async [hiddenSym](key: symbol, args: any) {
+    if (key !== callSym) throw new Error('Invalid call to hiddenSym');
     await super[hiddenSym](key, args);
     this.#subdata = 3;
   }

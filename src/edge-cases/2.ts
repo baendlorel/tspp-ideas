@@ -47,7 +47,7 @@ declare function sideEffect(tag: string): any;
  * ========================================================================== */
 
 /**
- * case01 【语义偏差】子类字段初始化早于父类的 async 部分（已验证）
+ * case01 ✅ 【语义偏差】子类字段初始化早于父类的 async 部分（已验证）
  *
  * 原生语义：`await super()` 返回之后，子类字段才初始化。即顺序为
  *   父类字段 -> 父类 async 体 -> 子类字段 -> 子类 async 体余下部分
@@ -80,9 +80,11 @@ async function case01_fieldOrder() {
   const b = await new B();
   void b;
 }
+// # 可以接受
+// ✅ 已接受：这是 SubInit 已知的顺序偏差（子类字段先于父类 async 体安装），不修复，只在文档里标明。
 
 /**
- * case02 【语义偏差】同步子类（含隐式构造函数）的构造函数体先于父类 async 初始化执行（已验证）
+ * case02 ✅ 【语义偏差】同步子类（含隐式构造函数）的构造函数体先于父类 async 初始化执行（已验证）
  *
  * 显式同步构造函数 `constructor() { super(); log('F') }` 的函数体留在真正的 constructor 里，
  * 实测顺序 `F sync body -> E init`。原生语义下，同步子类调用 `super()` 得到的是 Promise，
@@ -111,9 +113,13 @@ async function case02_syncSubclass() {
   }
   void F;
 }
+// # 这不是很正常吗
+// ✅ 你说得对，不是偏差：原生语义下同步子类的 `super()` 不 await，函数体同样先于父类 async 体执行，
+//    顺序 `F sync body -> E init` 与原生一致。剩下的只是提案层面“同步子类要不要报错”，与降级方案无关。
+
 
 /**
- * case03 【语义偏差】参数被求值两次（已验证）
+ * case03 ✅ 【语义偏差】参数被求值两次（已验证）
  *
  * `constructor(args)` 与 `[hiddenSym](key, args)` 各自带一份形参列表。
  * 默认值、解构、getter、`arguments` 访问里的副作用会执行两次（实测 `++calls` 跑了 2 次）。
@@ -133,9 +139,13 @@ async function case03_argsTwice() {
   }
   await new G(); // 降级后 'default' 的副作用发生 2 次
 }
+// # 填充一些args在里面但不使用就可以了
+// ✅ 可行：真正的 constructor 只生成不带默认值 / 解构的占位形参（如 `constructor(_0, _1)`），没有副作用，
+//    参数只在 [hiddenSym] 里解析一次。占位个数取原 constructor 的 `length`（第一个默认值 / rest 之前的参数数），
+//    这样 `Class.length` 也和原来一致。
 
 /**
- * case04 【方案缺陷】TS 参数属性 `constructor(private x)`
+ * case04 ✅ 【方案缺陷】TS 参数属性 `constructor(private x)`
  *
  * 参数属性的赋值由 TS 编译器插到 constructor 体的开头（super 之后）。
  * 如果 async constructor 带参数属性：赋值该放在同步 constructor 里还是 [hiddenSym] 里？
@@ -153,9 +163,12 @@ async function case04_parameterProperty() {
   }
   void A;
 }
+// # 直接降级为在构造函数体顶部写赋值语句
+// ✅ 可行：在 [hiddenSym] 体顶部写 `this.x = x`（派生类放在 `await super[hiddenSym](...)` 之后，与 TS 对 super() 的处理一致）。
+//    顺序与原生一致（先于 async 体余下部分）；“new 之后 init 之前 x 是 undefined”的窗口属于 case06 的误用范围，不再单独算问题。
 
 /**
- * case05 【方案缺陷】`createInstance` 只支持单个参数
+ * case05 ✅ 【方案缺陷】`createInstance` 只支持单个参数
  *
  * plan/subinit.ts 里是 `createInstance(cls, args)`，`new A(a, b)` 要改成 `...args`。
  * 另外 `[hiddenSym](key, ...args)` 把 key 放在参数头部，使得 `Function.prototype.length` /
@@ -172,13 +185,22 @@ async function case05_multipleArgs() {
   const a = await new A(1, 'x');
   void a;
 }
+// # 可以把sym放在最后面
+// ⚠️ 不建议放最后：调用方实参个数不固定，`inst[hiddenSym](...args, callSym)` 里 callSym 的位置随实参个数变化
+//    （声明 `(a, b, key)` 但只传 1 个参数时，callSym 会落进 b）；带 rest 参数时 rest 必须是最后一个，key 根本没法放后面。
+//    保持 key 在第一位、其余用 `...args` 展开最稳。
+//    另外我原文里“Function.length 偏移”说错了：length 看的是真正的 constructor，不是 [hiddenSym]，没有影响。
+//    此条真正剩下的只有：plan/subinit.ts 的 createInstance 还是单参数 `args`，需要改成 `...args`。
+// # 行，按你的改法
+// ✅ 已改：plan/subinit.ts 的 createInstance 现在是 `(cls, ...args)`，内部 `new cls(...args)` 和
+//    `inst[hiddenSym](callSym, ...args)`，调用点 `createInstance(A, {})` 与 `new A({})` 一一对应。
 
 /* ========================================================================== *
  * B. 调用验证与误用
  * ========================================================================== */
 
 /**
- * case06 【方案缺陷】直接 `new A()` 得到半初始化对象，且没有任何报错（已验证）
+ * case06 ✅ 【方案缺陷】直接 `new A()` 得到半初始化对象，且没有任何报错（已验证）
  *
  * 原生提案中 `new A()` 得到 Promise，忘了 await 至少能被发现（行为和 Promise 一样）。
  * SubInit 里 `new C().d` 是 undefined，不抛错。包括：
@@ -203,9 +225,12 @@ async function case06_bareNew() {
   const c = new C(); // 降级后：c 是未初始化的 C；原生：c 是 Promise
   void c;
 }
+// # 直接new A不等待不then本身就是错误用法，应当自行承担
+// ✅ 已接受：设计决定，不加 pendingTarget 校验。仅保留一个提醒：库内部的反射构造（`new this.constructor()`、
+//    `Reflect.construct`）也会落到这里，它们不是调用方的错，但原生语义下同样拿到 Promise，所以不算降级引入的新问题。
 
 /**
- * case07 【方案缺陷】callSym 的“调用验证”没有实际作用
+ * case07 ✅ 【方案缺陷】callSym 的“调用验证”没有实际作用
  *
  * plan/subinit.ts 里 `key` 参数从未被检查。即使加上检查：
  *   - callSym 是模块级私有的，跨模块的子类和 createInstance 对不上；
@@ -216,9 +241,16 @@ async function case06_bareNew() {
  * 不要靠 symbol 做验证。
  */
 async function case07_callSymNotChecked() {}
+// # 现在校验了
+// ⚠️ 只加了一半：plan/subinit.ts 里 ASub 的 [hiddenSym] 有 `if (key !== callSym) throw`，但 A 的 [hiddenSym]（第 30 行）没有。
+//    编译器应对每个生成的 [hiddenSym] 统一插入这行。补上后“从未检查”这一点就解决了；
+//    “callSym 跨模块要导出所以不私有”仍然存在，见 case19。
+// # 加好了
+// ✅ 已核对：plan/subinit.ts 第 31、49 行，A 和 ASub 的 [hiddenSym] 都有 key 校验，“从未检查”已解决。
+//    剩余的“跨模块要共享 symbol”转到 case19，不属于本条。
 
 /**
- * case08 【方案缺陷】重复调用 [hiddenSym] 会重复初始化（已验证）
+ * case08 ✅ 【方案缺陷】重复调用 [hiddenSym] 会重复初始化（已验证）
  *
  * `await createInstance(D); await d[hiddenSym](callSym)` 实测 init 跑了 2 次。
  * 原生 async constructor 只能运行一次。
@@ -228,10 +260,32 @@ async function case07_callSymNotChecked() {}
  * 代价：多一个 WeakSet 和一次查询；子类调用 super[hiddenSym] 时是同一个 this，
  *       状态位只能挂在最外层的 createInstance 上，不能在每层 [hiddenSym] 里检查。
  */
-async function case08_doubleInit() {}
+async function case08_doubleInit() {
+  // 前提：跨模块的子类需要 hiddenSym / callSym（case19），所以它们被导出了。
+  // 此时 key 校验拦不住任何人：谁拿到 callSym，谁就能重新触发初始化。
+  class Conn {
+    #conn: any;
+    async [hiddenSym](key: symbol) {
+      if (key !== callSym) throw new Error('Invalid call to hiddenSym');
+      this.#conn = await load(); // 打开连接
+    }
+  }
+  const c: any = await createInstance(Conn);
+  await c[hiddenSym](callSym); // 第二次 init：又打开一条连接，第一条泄漏，#conn 被覆盖
+  // 原生 async constructor 只会跑一次，没有任何入口能再跑第二次。
+}
+// ?? 帮我举例
+// ⚠️ 上面补了示例。要点：编译器自己生成的代码不会重复调用，只有“符号被导出 + 外部代码手动调用”才会触发，
+//    所以优先级取决于你是否接受导出 symbol（case19）。如果 symbol 保持模块私有，这条可以直接划掉。
+// # 本就不允许这样做，这是逆天而行。这两个symbol是默认不会被发现的，如果非要认为会发现，那么降级无意义。
+// ✅ 同意，划掉：手动调 [hiddenSym] 等于绕过语言层面的构造入口，和手动调 Object.setPrototypeOf 破坏实例同类，
+//    不是降级方案要防的东西，WeakSet 状态位也不需要加。
+//    唯一要留意的是 case19：跨模块子类确实要拿到 hiddenSym，“不被发现”只能靠约定（不导出到公共 API / 命名约定），
+//    不是真正的私有。这条在 case19 里讨论，不影响本条结论。
+
 
 /**
- * case09 【语义偏差】init 失败后实例的状态
+ * case09 ✅ 【语义偏差】init 失败后实例的状态
  *
  * 原生：`await new A()` reject，调用者拿不到实例，半初始化的对象被丢弃。
  * SubInit：[hiddenSym] reject 时 createInstance 同样 reject，调用者也拿不到实例。看似一致，
@@ -240,13 +294,16 @@ async function case08_doubleInit() {}
  * 这在原生 async constructor 里同样存在，只是 SubInit 多了“外部能拿到 [hiddenSym]”这一条入口。
  */
 async function case09_initFailure() {}
+// # 错的时候是脏对象，这个本来就没用啊。这是正常现象
+// ✅ 已接受：init 失败后调用方拿不到实例，与原生一致；this 提前逃逸造成的脏对象，原生里同样存在。
+
 
 /* ========================================================================== *
  * C. 继承
  * ========================================================================== */
 
 /**
- * case10 【无解】super(...) 的参数在 constructor 里算不出来；父类是同步类 / 内建类 / 第三方类
+ * !case10 【无解】super(...) 的参数在 constructor 里算不出来；父类是同步类 / 内建类 / 第三方类
  *
  * 原文里的 `await super(x)` 之前允许有 async 的计算：
  *   async constructor() { const x = await load(); await super(x); }
@@ -271,6 +328,26 @@ async function case10_nonAsyncParent() {
   void MyMap;
 }
 
+// # 它会被词法分析并转换为
+class MyMap extends Map<any,any>{
+  arg1:any;
+  constructor(原本的arg1:any,原本的argN:any,...super依赖的args:any[]) {
+    super(super依赖的args);
+    // 根据入参设置成员值
+    this.arg1 = 原本的arg1
+  }
+}
+// 通过词法分析制作出特有构造工厂：
+async function createMyMap(...args: any[]) {
+  const entries = await load();
+  return Reflect.construct(MyMap, [...args, [entries]], MyMap);
+}
+
+// & 可行的原因：一定有一个完整的异步逻辑得到每一个需要初始化的值，那么它就一定能够制作成一个返回这些值的特殊函数，
+// & 因此，在工厂函数中调用这个函数就能做到直接获取所有初始化需要的值，再进入构造函数即可。
+
+
+
 /**
  * case11 【方案缺陷】[hiddenSym] 在父类没有 async constructor 时是 undefined
  *
@@ -281,6 +358,7 @@ async function case10_nonAsyncParent() {
  *       并且它会把“父类其实应该是 async 的但忘了编译”的错误静默吞掉。
  */
 async function case11_superMayBeMissing() {}
+// # 也许问题10的解决方式是更好的方案
 
 /**
  * case12 【方案缺陷】mixin / 装饰器 / Proxy 包装类 要透传 [hiddenSym]
@@ -292,6 +370,7 @@ async function case11_superMayBeMissing() {}
  * 与 1.ts case09 同源，但 SubInit 比 throw 方案宽松，因为不需要劫持 constructor 的返回值。
  */
 async function case12_mixinAndDecorator() {}
+// ! 确实是个问题，这很复杂
 
 /**
  * case13 【无解】编译期不知道继承链上有没有 async constructor
@@ -301,6 +380,7 @@ async function case12_mixinAndDecorator() {}
  * 只能靠类型声明（case21）或者要求用户显式标注。与 1.ts case08 同源。
  */
 async function case13_unknownParent() {}
+// # 存在[hiddenSym]就视作“有”
 
 /* ========================================================================== *
  * D. 构造函数体语义
@@ -327,6 +407,7 @@ async function case14_newTarget() {
   }
   void H;
 }
+// # new.target本来就不能完美模拟，可以接受，babel都做不到
 
 /**
  * case15 【方案缺陷】构造函数里的 `return` 语义丢了
@@ -341,6 +422,7 @@ async function case14_newTarget() {
  * 提案建议直接禁止 async constructor 里 `return 非 undefined`。
  */
 async function case15_return() {}
+// ! 不会允许构造函数return
 
 /**
  * case16 【方案缺陷】TS 严格检查：属性初始化 / readonly
@@ -362,6 +444,7 @@ async function case16_tsChecks() {
   }
   void A;
 }
+// # 降级方案针对从ts直接到js，js里没有这个问题
 
 /**
  * case17 【方案缺陷】构造函数体的 `this` 转义
@@ -373,6 +456,7 @@ async function case16_tsChecks() {
  * 它们里面若把 this 传出去，外界看到的是“字段已装、async 体未跑”的状态。
  */
 async function case17_thisEscape() {}
+// # 这是坏实践，不该这样写
 
 /* ========================================================================== *
  * E. 调用点（与 1.ts 共通，只做索引）
@@ -392,6 +476,8 @@ async function case17_thisEscape() {}
  *                  case22（实例是 thenable）这两类问题。
  */
 async function case18_callSites() {}
+// # 我不知道你在胡说什么
+// # 这个我已经加入了normal.ts顶部的正常现象范围。 不await的new一定是返回promise的，因为实际调用的是个async工厂。
 
 /* ========================================================================== *
  * F. symbol 的工程问题
@@ -407,6 +493,7 @@ async function case18_callSites() {}
  * 取舍：私有性 vs 跨 bundle 互通。大多数库场景需要互通。
  */
 async function case19_symbolIdentity() {}
+// # 可以用symfor或者其他符号。会被发现这件事是无所谓的，因为所有框架都这么做，没事的
 
 /**
  * case20 【方案缺陷】Reflect.ownKeys / 反射 / 序列化会看到 [hiddenSym]
@@ -418,6 +505,7 @@ async function case19_symbolIdentity() {}
  * 方法设成不可枚举（`Object.defineProperty`）可以减轻前两项，需要放弃 class 方法的简写语法。
  */
 async function case20_reflection() {}
+// # 降级带来的正常现象，默认看不见，没事的
 
 /**
  * case21 【方案缺陷】类型声明（.d.ts）与结构类型
@@ -431,6 +519,7 @@ async function case20_reflection() {}
  *   - 参数前面多出 `key` 后，[hiddenSym] 的签名与子类覆写的参数类型要保持一致
  */
 async function case21_types() {}
+// # 没事的
 
 /* ========================================================================== *
  * G. 其他
@@ -445,6 +534,7 @@ async function case21_types() {}
  * createInstance 是 async 函数，两者都会变成 reject，这一点反而更接近原生。
  */
 async function case22_stack() {}
+// # 没事的，这还省去了promisetry吧？
 
 /**
  * case23 【语义偏差】性能
@@ -454,6 +544,7 @@ async function case22_stack() {}
  * 除非编译器能证明链上所有 async constructor 都没有真正的 await，才可以回退成普通 constructor。
  */
 async function case23_perf() {}
+// # 降级的正常现象
 
 /**
  * case24 【方案缺陷】静态成员 / 静态块 / 类表达式
@@ -464,3 +555,4 @@ async function case23_perf() {}
  *   - 嵌套类 / 类内部的 `new this.constructor()` / `new.target`：编译期无法识别为 async 构造（case06）
  */
 async function case24_staticAndExpression() {}
+// # 降级的正常现象
